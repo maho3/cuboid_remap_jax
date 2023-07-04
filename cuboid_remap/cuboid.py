@@ -1,46 +1,47 @@
 """
-cuboid class and related objects
+Cuboid class and related objects
 
-This code is a simple rewrite of Jordan Carlson and Martin White's code.
+This code is a rewrite of Duncan Campbell's code, which itself was a rewrite
+of Jordan Carlson and Martin White's code for cuboid remapping. Almost all of
+the code structure remains exactly the same as Campbell's implementation.
 
-I have removed the dependence on the vec3 class in the original implementation
-in favor of off-the-shelf numpy vector objects and functions.
+The algorithmic details of most of the code remains exactly the same as the
+original Carlson-White implementation. This includes the construction of the
+Cuboid tesselation. The primary difference now is in the implementation of
+Cuboid.Transform, which has been made significantly more efficient through
+vectorization with Jax.
 """
 
 from __future__ import print_function, division
-from math import floor, ceil, fmod
+from math import floor, ceil
 import numpy as np
-from cuboid_remap.utils import triple_scalar_product
-import jax
+from jax import Array
 import jax.numpy as jnp
+from jax.typing import ArrayLike
+from cuboid_remap.utils import triple_scalar_product
 
 
 __all__ = ['Cuboid', 'Plane', 'Cell', 'unitCubeTest']
-__author__ = ['Duncan Campbell', 'see doc string note']
 
 
 class Cuboid:
-    """
-    cuboid remapping class.
-    """
-
-    def __init__(self, u1=[1, 0, 0], u2=[0, 1, 0], u3=[0, 0, 1]):
+    def __init__(
+            self,
+            u1: ArrayLike = [1, 0, 0],
+            u2: ArrayLike = [0, 1, 0],
+            u3: ArrayLike = [0, 0, 1]
+    ):
         """
-        Parameters
-        ----------
-        u1 : array_like
-            lattice vector, integer array of length 3
+        Cuboid remapping class.
 
-        u2 : array_like
-            lattice vector, integer array of length 3
+        Args:
+            u1: lattice vector, integer array of length 3
+            u2: lattice vector, integer array of length 3
+            u3: lattice vector, integer array of length 3
 
-        u3 : array_like
-            lattice vector, integer array of length 3
-
-        Notes
-        -----
-        u1,u2,u3 form an unimodular invertable 3x3 integer matrix.
-        See the functions the remap.py to select lattive vectors
+        Notes:
+            u1,u2,u3 form an unimodular invertable 3x3 integer matrix.
+            See the functions the remap.py to select lattive vectors
         """
         u1 = np.atleast_1d(u1).astype('float64')
         u2 = np.atleast_1d(u2).astype('float64')
@@ -108,7 +109,7 @@ class Cuboid:
                              Plane(self.v[0] + shift, +1.0*self.n3),
                              Plane(self.v[1] + shift, -1.0*self.n3)]
 
-                    c = Cell(ix, iy, iz)
+                    c = Cell((ix, iy, iz))
                     skipcell = False
                     for f in faces:
                         r = unitCubeTest(f)
@@ -131,23 +132,30 @@ class Cuboid:
         if len(self.cells) == 0:
             self.cells.append(Cell())
 
+        # Store positions and orientations of all faces as matrices
+        # These are used to speed up Transform computation
+
         # store all unique faces of data
         unique_faces = {}
         for i, c in enumerate(self.cells):
             for j, f in enumerate(c.faces):
-                n = np.array((f.a, f.b, f.c, f.d))
+                n = np.array((*f.n, f.d))
                 if tuple(n) in unique_faces:
                     unique_faces[tuple(n)].append((i, 1))
-                elif tuple(-1*n) in unique_faces:
-                    unique_faces[tuple(-1*n)].append((i, -1))
+                elif tuple(-n) in unique_faces:
+                    unique_faces[tuple(-n)].append((i, -1))
                 else:
                     unique_faces[tuple(n)] = [(i, 1)]
 
         Nface = len(unique_faces)
         Ncell = len(self.cells)
 
+        # normals of all faces
         self.normals = np.zeros(shape=(Nface, 3))
+        # offset of all faces
         self.d = np.zeros(shape=(Nface, 1))
+        # selection matrix which specifies which side of faces are
+        # in which cells
         self.select = np.zeros(shape=(Ncell, Nface))
 
         for i, (key, value) in enumerate(unique_faces.items()):
@@ -156,105 +164,118 @@ class Cuboid:
             for c, f in value:
                 self.select[c, i] = f
 
-        self.cell_cens = np.array([[c.ix, c.iy, c.iz] for c in self.cells])
-        self.nmat = np.stack([self.n1, self.n2, self.n3])
+        # center positions of all cells
+        self.cell_cens = jnp.array([c.pos for c in self.cells])
+        # matrix of transformation vectors
+        self.nmat = jnp.stack([self.n1, self.n2, self.n3])
 
-    def Transform(self, x, y, z):
-        """
-        Transform coordinates
-        """
-        data = jnp.stack([x, y, z])[:, None]
-        bools = ~jnp.all(
-            (self.select * (self.normals@data+self.d).T) > 0, axis=1)
-        offset = jnp.sum(jnp.where(bools[:, None], 0, self.cell_cens), axis=0)
-        return jnp.dot(self.nmat, (data[:, 0] + offset))
+    def Transform(self, x: ArrayLike) -> Array:
+        """Transform coordinates to the cuboid domain
 
-    def InverseTransform(self, r1, r2, r3):
+        Args:
+            x (ArrayLike): Point or array of points to transform to the
+                cuboid. Can be of shape (3,) or (N, 3), where N is the
+                number of points.
+
+        Returns:
+            Array: Transformed points of equal shape to input x
         """
-        Inverse transform coordinates
+        x = jnp.atleast_2d(x).T
+        bools = jnp.all(
+            (self.select * (self.normals@x+self.d).T) >= 0, axis=1)
+        offset = jnp.sum(jnp.where(bools[:, None], self.cell_cens, 0), axis=0)
+        return jnp.squeeze(jnp.dot(self.nmat, (x[:, 0] + offset)))
+
+    def InverseTransform(self, r: ArrayLike) -> Array:
+        """Transform coordinates from the cuboid domain to the unit cube
+
+        Args:
+            r (ArrayLike): Point or array of points to transform to the
+                unit cube. Can be of shape (3,) or (N, 3), where N is the
+                number of points.
+
+        Returns:
+            Array: Transformed points of equal shape to input r
         """
-        p = r1*self.n1 + r2*self.n2 + r3*self.n3
-        x1 = fmod(p[0], 1) + (p[0] < 0)
-        x2 = fmod(p[1], 1) + (p[1] < 0)
-        x3 = fmod(p[2], 1) + (p[2] < 0)
-        return np.array([x1, x2, x3])
+        r = jnp.atleast_2d(r).T
+        p = jnp.dot(self.nmat, r)
+        x = jnp.fmod(p, 1) + (p < 0)
+        return jnp.squeeze(x)
+
+    def TransformVelocity(self, v: ArrayLike) -> Array:
+        """Transform velocity from the unit cube to the cuboid domain
+
+        Args:
+            v (ArrayLike): Velocity or array of velocities to transform to the
+                cuboid. Can be of shape (3,) or (N, 3), where N is the
+                number of points.
+
+        Returns:
+            Array: Transformed velocities of equal shape to input v
+        """
+        v = jnp.atleast_2d(v).T
+        return jnp.squeeze(jnp.dot(self.nmat, v))
 
 
 class Plane:
-    """
-    class to represent a plane in 3-D cartesian space
-    """
+    def __init__(self, p: ArrayLike, n: ArrayLike):
+        """Class to represent a plane in 3-D cartesian space
 
-    def __init__(self, p, n):
+        Args:
+            p (ArrayLike): A point on the plane
+            n (ArrayLike): The normal vector to the plane
         """
-        Parameters
-        ----------
-        p : array_like
-            a point in a plane
+        self.n = jnp.array(n)
+        self.d = -1.0*jnp.dot(p, n)
 
-        n : array_like
-            a vector normal to the plane
+    def above(self, x: ArrayLike) -> float:
+        """Compare a point to a plane.
+
+        Args:
+            x (ArrayLike): coordinates of a point
+
+        Returns:
+            float: positive if point is above the plane, negative if below
         """
-        self.normal = n
-        self.a = n[0]
-        self.b = n[1]
-        self.c = n[2]
-        self.d = -1.0*np.dot(p, n)
-
-    def above(self, x, y, z):
-        """
-        Compare a point to a plane.
-
-        Parameters
-        ----------
-        x, y, z : float
-             coordinates of a point
-
-        Returns
-        -------
-        above : float
-            value is positive, negative, or zero depending on whether
-            the point lies above, below, or on the plane.
-        """
-        return self.a*x + self.b*y + self.c*z + self.d
+        x = jnp.atleast_1d(x)
+        return jnp.dot(x, self.n) + self.d
 
 
 class Cell:
-    """
-    class to represent a cell
-    """
+    def __init__(self, pos: ArrayLike):
+        """Class to represent a cell
 
-    def __init__(self, ix=0, iy=0, iz=0):
+        Args:
+            pos (ArrayLike): position of the cell
         """
-        """
-        self.ix = ix
-        self.iy = iy
-        self.iz = iz
+        self.pos = jnp.array(pos)
         # collection of planes that define the faces of the cell
         self.faces = []
 
-    def contains(self, x, y, z):
+    def contains(self, x) -> bool:
         """
-        determine if the cell contains a point
+        Determine if a point is inside the cell
+
+        Args:
+            x (ArrayLike): coordinates of a point
+
+        Returns:
+            bool: True if point is inside the cell, False otherwise
         """
-
-        out = jnp.array([jnp.less(-f.above(x, y, z), 0) for f in self.faces])
-
+        out = jnp.array([jnp.less(-f.above(x), 0) for f in self.faces])
         return jnp.all(out)
 
 
-def unitCubeTest(P):
+def unitCubeTest(P: Plane) -> int:
     """
-    Detemrine if a unit cube is above, below, or intersecting a plane
+    Determine if a unit cube is above, below, or intersecting a plane
 
-    Parameters
-    ----------
-    P : plane object
+    Args:
+        P (Plane): Plane to test
 
-    Returns
-    -------
-    u : int
-        [+1, 0, -1] if the unit cube is above, below, or intersecting the plane.
+    Returns:
+        int: [+1, 0, -1] if the unit cube is above, below, or intersecting
+            the plane.
     """
 
     above = 0
@@ -262,8 +283,8 @@ def unitCubeTest(P):
 
     corners = [(0, 0, 0), (0, 0, 1), (0, 1, 0), (0, 1, 1),
                (1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1)]
-    for (a, b, c) in corners:
-        s = P.above(a, b, c)
+    for corner in corners:
+        s = P.above(corner)
         if s > 0:
             above = 1
         elif s < 0:

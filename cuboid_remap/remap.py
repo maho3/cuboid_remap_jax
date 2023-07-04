@@ -3,33 +3,37 @@
 
 from __future__ import print_function, division
 import numpy as np
-import sys
 from copy import deepcopy
-from itertools import combinations_with_replacement, permutations
+from itertools import permutations
 from cuboid_remap.cuboid import Cuboid
 from cuboid_remap.utils import triple_scalar_product, coprime_triples
 import jax
+from jax import Array
+from jax.typing import ArrayLike
 
 
 __all__ = ['remap', 'remap_Lbox', 'generate_lattice_vectors']
-__author__ = ['Duncan Campbell', ]
 
 
-def remap(coords, Lbox, u1=[1, 0, 0], u2=[0, 1, 0], u3=[0, 0, 1]):
-    """
-    Re-map coordinates in a periodic box.
+def remap(
+        coords: ArrayLike,
+        Lbox: float,
+        u1: ArrayLike = [1, 0, 0],
+        u2: ArrayLike = [0, 1, 0],
+        u3: ArrayLike = [0, 0, 1]
+) -> Array:
+    """Remap coordinates to a cuboid with lattice vectors u1, u2, u3.
 
-    Parameters
-    ----------
-    coords : array_like
-        numpy of array of shape (3,npts)
+    Args:
+        coords (ArrayLike): Array of coordinates to be remapped.
+            Can be any shape, but last dimension must be 3.
+        Lbox (float): Length of the cube sides.
+        u1, u2, u3 (ArrayLike, optional):  Lattice vectors of the cuboid
+            transformation. Defaults to [1, 0, 0], [0, 1, 0], and [0, 0, 1],
+            respectively.
 
-    Lbox : float
-
-    Returns
-    -------
-    new_coords : numpy.array
-        remaped coordinates
+    Returns:
+        Array: Remapped coordinates.
     """
 
     coords = deepcopy(coords)
@@ -40,32 +44,22 @@ def remap(coords, Lbox, u1=[1, 0, 0], u2=[0, 1, 0], u3=[0, 0, 1]):
     C = Cuboid(u1, u2, u3)
 
     # loop through each coordinate
-    Npts = np.shape(coords)[0]
-    transform = jax.vmap(C.Transform)
-    coords = transform(coords[:, 0], coords[:, 1], coords[:, 2])
-    # for i in range(Npts):
-    #     coords[i, :] = C.Transform(coords[i, 0], coords[i, 1], coords[i, 2])
+    transform = jax.vmap(C.Transform, in_axes=0)
+    coords = transform(coords)
 
     return coords*Lbox
 
 
 def remap_Lbox(u1=[1, 0, 0], u2=[0, 1, 0], u3=[0, 0, 1], Lbox=[1, 1, 1]):
-    """
-    Return re-mapped cuboid sides given a set of lattive vectors.
+    """Return re-mapped cuboid sides given a set of lattive vectors.
 
-    Parameters
-    ----------
-    u1 : array_like
+    Args:
+        u1, u2, u3 (ArrayLike, optional):  Lattice vectors of the cuboid
+            transformation. Defaults to [1, 0, 0], [0, 1, 0], and [0, 0, 1],
+            respectively.
 
-    u2 : array_like
-
-    u3 : array_like
-
-    Returns
-    -------
-    Lbox : numpy.array
-        length 3 array containing sorted cuboid side lengths
-
+    Returns:
+        Array: Sorted cuboid side lengths.
     """
 
     u1 = np.atleast_1d(u1)
@@ -98,33 +92,26 @@ def remap_Lbox(u1=[1, 0, 0], u2=[0, 1, 0], u3=[0, 0, 1], Lbox=[1, 1, 1]):
     return L1, L2, L3
 
 
-def generate_lattice_vectors(max_int=5):
+def generate_lattice_vectors(max_int=2) -> dict:
     """
     Generate all invertible, integer-valued, 3x3 unimodular matrices.
     These are used as shear matrices in the cuboid remapping alogorithm.
 
-    Parameters
-    ----------
-    max_int : int
-        maximum value for a matrix element
+    Args:
+        max_int (int): maximum value for a matrix element
 
-    Returns
-    -------
-    d : dictionary
-        dictionary of shear matrices.  The keys of the dictionary
-        are the sorted cuboid side lengths. The associated values
-        are invertible, integer-valued, 3x3 unimodular matrices.
+    Returns:
+        d (dict): dictionary of shear matrices.  The keys of the dictionary
+            are the sorted cuboid side lengths. The associated values
+            are invertible, integer-valued, 3x3 unimodular matrices.
 
-    Notes
-    -----
-    Right now this uses a brute-force search method.  However, only
-    matrices with co-prime triplet rows are conisdered.  I think
-    this follows from the Quillen-Suslin Theorem.
+    Notes:
+        Currently uses very slow brute-force search method. Todo: Make faster.
     """
 
     # find all coprime triples in the range [-max_int, max_int]
     d = coprime_triples(max_int, -1*max_int)
-    triplets = d.keys()
+    triplets = list(d.keys())
 
     # examine permuations of coprime triplets
     triplets = [[perm for perm in permutations(
