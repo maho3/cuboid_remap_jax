@@ -33,6 +33,8 @@ transformed_data = remap(
 ```
 where `Lbox` is the size of the periodic cube and `u1`, `u2`, and `u3` are the three lattice vectors defining the cuboid domain.
 
+For more examples, see the [tutorial](./notebooks/tutorial.ipynb).
+
 
 ## Contact
-Email me at: <mailto:matthew.annam.ho@gmail.com>
+Email me at: <matthew.annam.ho@gmail.com>

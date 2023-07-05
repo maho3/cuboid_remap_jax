@@ -50,7 +50,7 @@ def remap(
     return coords*Lbox
 
 
-def remap_Lbox(u1=[1, 0, 0], u2=[0, 1, 0], u3=[0, 0, 1], Lbox=[1, 1, 1]):
+def remap_Lbox(u1=[1, 0, 0], u2=[0, 1, 0], u3=[0, 0, 1]):
     """Return re-mapped cuboid sides given a set of lattive vectors.
 
     Args:
@@ -126,13 +126,13 @@ def generate_lattice_vectors(max_int=2) -> dict:
     num_remappings = 0
 
     for i in range(num_triplets):
-        u1 = np.array(triplets[i])
+        u1 = np.array(triplets[i], dtype=int)
 
         for j in range(num_triplets):
-            u2 = np.array(triplets[j])
+            u2 = np.array(triplets[j], dtype=int)
 
             for k in range(num_triplets):
-                u3 = np.array(triplets[k])
+                u3 = np.array(triplets[k], dtype=int)
 
                 # check to see if matrix is unimodular
                 if triple_scalar_product(u1, u2, u3) == 1:
