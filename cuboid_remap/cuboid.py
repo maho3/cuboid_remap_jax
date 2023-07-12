@@ -180,11 +180,18 @@ class Cuboid:
         Returns:
             Array: Transformed points of equal shape to input x
         """
+        x = x.astype(jnp.float64)
         x = jnp.atleast_2d(x).T
         bools = jnp.all(
             (self.select * (self.normals@x+self.d).T) >= 0, axis=1)
         offset = jnp.sum(jnp.where(bools[:, None], self.cell_cens, 0), axis=0)
-        return jnp.squeeze(jnp.dot(self.nmat, (x[:, 0] + offset)))
+        return jnp.squeeze(jnp.dot(self.nmat, (x[:, 0] + offset)))%jnp.array([self.L1, self.L2, self.L3])
+    
+        # todo: the % is a hack to make sure that the transformed
+        # coordinates are in the unit cube. This is necessary because
+        # something weird happens when the coordinate falls exactly on
+        # the boundary of the Plane. This should be fixed.
+
 
     def InverseTransform(self, r: ArrayLike) -> Array:
         """Transform coordinates from the cuboid domain to the unit cube
