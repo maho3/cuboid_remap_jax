@@ -131,7 +131,7 @@ class Cuboid:
 
         # for the identity remapping, use exactly one cell
         if len(self.cells) == 0:
-            self.cells.append(Cell())
+            self.cells.append(Cell((0, 0, 0)))
 
         # Store positions and orientations of all faces as matrices
         # These are used to speed up Transform computation
