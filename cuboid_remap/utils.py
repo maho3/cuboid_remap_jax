@@ -3,8 +3,6 @@ utility functions for cuboid_remap
 """
 
 from __future__ import print_function, division
-import sys
-import numpy as np
 from jax.typing import ArrayLike
 
 

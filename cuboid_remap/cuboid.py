@@ -97,7 +97,7 @@ class Cuboid:
         izmin = int(floor(vmin[2]))
         izmax = int(ceil(vmax[2]))
 
-        # Determine which cells (and which faces within those cells) are non-trivial
+        # Determine which cells (and which faces) are non-trivial
         for ix in range(ixmin, ixmax):
             for iy in range(iymin, iymax):
                 for iz in range(izmin, izmax):
@@ -114,7 +114,8 @@ class Cuboid:
                     for f in faces:
                         r = unitCubeTest(f)
                         if r == +1:
-                            # unit cube is completely above this plane--this cell is empty
+                            # unit cube is completely above this plane
+                            # this cell is empty
                             continue
                         elif r == 0:
                             # unit cube intersects this plane--keep track of it
@@ -130,7 +131,7 @@ class Cuboid:
 
         # for the identity remapping, use exactly one cell
         if len(self.cells) == 0:
-            self.cells.append(Cell())
+            self.cells.append(Cell((0, 0, 0)))
 
         # Store positions and orientations of all faces as matrices
         # These are used to speed up Transform computation
@@ -185,13 +186,14 @@ class Cuboid:
         bools = jnp.all(
             (self.select * (self.normals@x+self.d).T) >= 0, axis=1)
         offset = jnp.sum(jnp.where(bools[:, None], self.cell_cens, 0), axis=0)
-        return jnp.squeeze(jnp.dot(self.nmat, (x[:, 0] + offset)))%jnp.array([self.L1, self.L2, self.L3])
-    
+        output = jnp.squeeze(jnp.dot(self.nmat, (x[:, 0] + offset)))
+        output %= jnp.array([self.L1, self.L2, self.L3])
+        return output
+
         # todo: the % is a hack to make sure that the transformed
         # coordinates are in the unit cube. This is necessary because
         # something weird happens when the coordinate falls exactly on
         # the boundary of the Plane. This should be fixed.
-
 
     def InverseTransform(self, r: ArrayLike) -> Array:
         """Transform coordinates from the cuboid domain to the unit cube
